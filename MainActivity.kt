@@ -1,73 +1,106 @@
-package com.example.obd2scanner
+package com.example.obd2carscanner
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.graphics.Color
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
 import android.widget.Button
-import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
-    private var bluetoothAdapter: BluetoothAdapter? = null
+
+    private val REQUEST_BLUETOOTH_PERMISSIONS = 1
+    private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private lateinit var statusTextView: TextView
+    private lateinit var connectButton: Button
     private var obdManager: OBDManager? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(savedInstanceState: Bundle  ?) {
         super.onCreate(savedInstanceState)
-
-        // කෝඩ් එකෙන්ම Layout එක හැදීම (XML ෆයිල් අවශ්‍ය නොවේ)
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+        
+        // මූලික UI සැකසුම (Programmatic Layout)
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
             setPadding(40, 40, 40, 40)
-            setBackgroundColor(Color.parseColor("#121212")) // Dark background
         }
 
-        val tvStatus = TextView(this).apply {
-            text = "Status: Not Connected"
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 40)
-        }
-
-        val btnConnect = Button(this).apply {
-            text = "Connect to OBD2"
+        statusTextView = TextView(this).apply {
+            text = "OBD2 Scanner Status: Disconnected"
             textSize = 16f
-            setBackgroundColor(Color.parseColor("#3F51B5"))
-            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 20)
         }
 
-        layout.addView(tvStatus)
-        layout.addView(btnConnect)
+        connectButton = Button(this).apply {
+            text = "Connect to ELM327"
+            setOnClickListener {
+                checkPermissionsAndConnect()
+            }
+        }
+
+        layout.addView(statusTextView)
+        layout.addView(connectButton)
         setContentView(layout)
+    }
 
-        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+    private fun checkPermissionsAndConnect() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN),
+                    REQUEST_BLUETOOTH_PERMISSIONS
+                )
+                return
+            }
+        }
+        
+        connectToOBD()
+    }
 
-        btnConnect.setOnClickListener {
-            // ඔබේ ELM327 බ්ලූටූත් ඩිවයිස් එකේ MAC Address එක මෙතැනට දෙන්න (උදා: "00:1D:A5:00:12:34")
-            val deviceAddress = "XX:XX:XX:XX:XX:XX" 
-            val device: BluetoothDevice? = bluetoothAdapter?.getRemoteDevice(deviceAddress)
+    private fun connectToOBD() {
+        if (bluetoothAdapter == null) {
+            Toast.makeText(this, "Bluetooth not supported on this device", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-            if (device != null) {
-                obdManager = OBDManager(device)
+        if (!bluetoothAdapter.isEnabled) {
+            Toast.makeText(this, "Please turn on Bluetooth", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // යුගල කරන ලද (Paired) ඩිවයිස් අතරින් ELM327 සොයාගැනීම
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
+            val elmDevice = pairedDevices?.find { it.name != null && (it.name.contains("OBD", ignoreCase = true) || it.name.contains("ELM", ignoreCase = true)) }
+
+            if (elmDevice != null) {
+                statusTextView.text = "Connecting to ${elmDevice.name}..."
+                
+                // Thread එකක් හරහා පසුබිමේ සම්බන්ධ වීම (Background Connection)
                 Thread {
-                    val success = obdManager?.connect() == true
+                    obdManager = OBDManager(elmDevice)
+                    val success = obdManager?.connect() ?: false
+                    
                     runOnUiThread {
                         if (success) {
-                            tvStatus.text = "Status: Connected to OBD2 Scanner!"
-                            tvStatus.setTextColor(Color.GREEN)
+                            statusTextView.text = "Connected Successfully!"
+                            Toast.makeText(this, "OBD2 Scanner Connected!", Toast.LENGTH_SHORT).show()
                         } else {
-                            tvStatus.text = "Status: Connection Failed!"
-                            tvStatus.setTextColor(Color.RED)
+                            statusTextView.text = "Connection Failed!"
+                            Toast.makeText(this, "Failed to connect to scanner.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }.start()
             } else {
-                tvStatus.text = "Status: Bluetooth Device not found!"
-                tvStatus.setTextColor(Color.YELLOW)
+                Toast.makeText(this, "No paired ELM327/OBD device found. Please pair it in Bluetooth settings first.", Toast.LENGTH_LONG).show()
+                statusTextView.text = "ELM327 device not found in paired list."
             }
         }
     }
