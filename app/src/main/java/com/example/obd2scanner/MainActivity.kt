@@ -74,19 +74,15 @@ class MainActivity : AppCompatActivity() {
                     val outputStream: OutputStream = socket.outputStream
 
                     // ELM327 ආරම්භක විධාන යැවීම (Initialization)
-                    sendCommand(outputStream, inputStream, "AT Z\r") // Reset
-                    sendCommand(outputStream, inputStream, "AT SP 0\r") // Automatic protocol detection
+                    sendCommand(outputStream, inputStream, "AT Z\r")
+                    sendCommand(outputStream, inputStream, "AT SP 0\r")
 
                     runOnUiThread {
                         statusTextView.text = "සාර්ථකව සම්බන්ධ විය! දත්ත ලබාගනිමින්..."
                     }
 
-                    // නිරන්තරයෙන් RPM සහ Temperature ලබාගැනීමේ ලූප් එක
                     while (socket.isConnected) {
-                        // 1. Engine RPM ලබාගැනීම (PID: 01 0C)
                         val rpm = requestRPM(outputStream, inputStream)
-                        
-                        // 2. Coolant Temperature ලබාගැනීම (PID: 01 05)
                         val temp = requestTemperature(outputStream, inputStream)
 
                         runOnUiThread {
@@ -98,7 +94,7 @@ class MainActivity : AppCompatActivity() {
                             """.trimIndent()
                         }
 
-                        Thread.sleep(1000) // තත්පර 1 කට වතාවක් අප්ඩේට් වේ
+                        Thread.sleep(1000)
                     }
 
                     socket.close()
@@ -115,33 +111,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendCommand(out: OutputStream, input: InputStream, command: String): String {
-        out.write(command.toByteArray())
-        out.flush()
-        
-        val buffer = ByteArray(1024)
-        val bytes = input.read(buffer)
-        return String(buffer, 0, bytes)
+        try {
+            out.write(command.toByteArray())
+            out.flush()
+            
+            val buffer = ByteArray(1024)
+            val bytes = input.read(buffer)
+            if (bytes > 0) {
+                return String(buffer, 0, bytes)
+            }
+        } catch (e: Exception) {
+            // දෝෂ මඟහරවා ගැනීම සඳහා
+        }
+        return ""
     }
 
     private fun requestRPM(out: OutputStream, input: InputStream): Int {
         try {
             val response = sendCommand(out, input, "01 0C\r")
-            // ප්‍රතිචාරය උදාහරණයක් ලෙස "41 0C 1A F8" වැනි විය හැක
+            if (response.isBlank()) return 0
+            
             val cleanResponse = response.replace(">", "").trim()
             val lines = cleanResponse.split("\n")
             for (line in lines) {
                 if (line.contains("41 0C")) {
-                    val parts = line.trim().split(" ")
+                    val parts = line.trim().split("\\s+".toRegex())
                     if (parts.size >= 4) {
-                        val A = parts[2].toInt(16)
-                        val B = parts[3].toInt(16)
-                        // RPM ගණනය කිරීමේ සූත්‍රය: ((A * 256) + B) / 4
+                        val A = parts[2].toIntOrNull(16) ?: 0
+                        val B = parts[3].toIntOrNull(16) ?: 0
                         return ((A * 256) + B) / 4
                     }
                 }
             }
         } catch (e: Exception) {
-            // දෝෂයක් මග හැරීමට
+            // දෝෂ මඟහරවා ගැනීම සඳහා
         }
         return 0
     }
@@ -149,21 +152,21 @@ class MainActivity : AppCompatActivity() {
     private fun requestTemperature(out: OutputStream, input: InputStream): Int {
         try {
             val response = sendCommand(out, input, "01 05\r")
-            // ප්‍රතිචාරය උදාහරණයක් ලෙස "41 05 7B" විය හැක
+            if (response.isBlank()) return 0
+            
             val cleanResponse = response.replace(">", "").trim()
             val lines = cleanResponse.split("\n")
             for (line in lines) {
                 if (line.contains("41 05")) {
-                    val parts = line.trim().split(" ")
+                    val parts = line.trim().split("\\s+".toRegex())
                     if (parts.size >= 3) {
-                        val A = parts[2].toInt(16)
-                        // උෂ්ණත්වය ගණනය කිරීමේ සූත්‍රය: A - 40
+                        val A = parts[2].toIntOrNull(16) ?: 0
                         return A - 40
                     }
                 }
             }
         } catch (e: Exception) {
-            // දෝෂයක් මග හැරීමට
+            // දෝෂ මඟහරවා ගැනීම සඳහා
         }
         return 0
     }
